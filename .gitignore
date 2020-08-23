@@ -1,5 +1,7 @@
 out/bin/*
 out/lib/*
+!out/bin/README.md
+!out/lib/README.md
 CMakeFiles
 CMakeCache.txt
 Makefile

@@ -8,7 +8,7 @@ typedef long long             int64;        /**< -9223372036854775808..922337203
 typedef unsigned char         uint8;        /**<  0..255                                   */
 typedef unsigned short        uint16;       /**<  0..65535                                 */
 typedef unsigned long         uint32;       /**<  0..4294967295                            */
-typedef unsigned long long    uint64        /**<  0..18446744073709551615                  */
+typedef unsigned long long    uint64;       /**<  0..18446744073709551615                  */
 
 typedef uint32                boolean;
 

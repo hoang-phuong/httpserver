@@ -1,6 +1,7 @@
 #include <stdio.h>
+#include "std_types.h"
 
-int main(int argc, char* argv[])
+int main(uint32 argc, uint8* argv[])
 {
   printf("Hello world");
   return 0;

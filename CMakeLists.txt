@@ -30,11 +30,12 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
 
 set(CMAKE_BINARY_DIR "out")
 
-# glob source files
-file(GLOB_RECURSE sources "src/*.c")
+# glob source files and header files
+file(GLOB_RECURSE sources  "src/*.c")
+file(GLOB includes "src/*")
 
 # add include directory
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${includes})
 
 # add the executable
 add_executable(${executable} ${sources})
