@@ -1,8 +1,19 @@
 #include <stdio.h>
 #include "std_types.h"
+#include "opt_parser.h"
 
-int main(uint32 argc, uint8* argv[])
+int main(int argc, char* argv[])
 {
-  printf("Hello world");
+  printf("Hello World !\r\n");
+
+  OptParser_AddOption('p', "port");
+  OptParser_AddOption('s', "string");
+
+  OptParser_Process(argc, argv);
+
+  char value[4096] = {0};
+
+  TcpServer_Start(8080, 5);
+
   return 0;
 }

@@ -47,3 +47,6 @@ set_target_properties(${executable}
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+target_link_libraries(${executable} pthread)
