@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include "std_types.h"
 #include "opt_parser.h"
+#include "linked_list.h"
+#include "hash_table.h"
 
 int main(int argc, char* argv[])
 {
