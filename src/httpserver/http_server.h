@@ -1,11 +1,22 @@
 #ifndef HTTP_SERVER_H
 #define HTTP_SERVER_H
 
+#include "hash_table.h"
+
 /* ** Defines ****************************************************************/
 #define HTTP_SERVER_DEFAULT_PORT            80
 #define HTTP_SERVER_MAX_REQ_LENGTH          8192
 #define HTTP_SERVER_MAX_URI_LENGTH          2000
 #define HTTP_SERVER_MAX_LINE_LENGTH         4096
+
+typedef enum
+{
+    HTTP_VERSION_1_0,
+    HTTP_VERSION_1_1,
+    HTTP_VERSION_2_0,
+
+    HTTP_VERSION_UNDEFINED
+} HttpVersionT;
 
 typedef enum
 {
@@ -28,6 +39,8 @@ typedef struct
     char         *pRequestBuffer;
     long          requestLength;
     HttpMethodT   method;
+    HttpVersionT  version;
+    HashTableT   *headers;
     long          pathOffset;
     long          pathLength;
     long          headersOffset;

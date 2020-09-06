@@ -9,6 +9,7 @@
 #define   CR_CHAR       '\r'
 #define   LF_CHAR       '\n'
 #define   CRLF          "\r\n"
+#define   COLON_CHAR    ':'
 
 #define   GET_PUT_CHAR_LENGTH       3
 #define   POST_HEAD_CHAR_LENGTH     4
@@ -28,7 +29,23 @@ static const char* methodConnectString  = "CONNECT";
 static const char* methodTraceString    = "TRACE";
 static const char* methodPatchString    = "PATCH";
 
-static const char* httpVersionString    = "HTTP/1.1";
+static const char* version10String      = "HTTP/1.0";
+static const char* version11String      = "HTTP/1.1";
+static const char* version20String      = "HTTP/2.0";
+
+static const char response[] = "HTTP/1.1 200 OK\r\n"
+                              "Date: Mon, 27 Jul 2009 12:28:53 GMT\r\n"
+                              "Server: Apache/2.2.14 (Win32)\r\n"
+                              "Last-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\n"
+                              "Content-Length: 54\r\n"
+                              "Content-Type: text/html\r\n"
+                              "Connection: Closed\r\n"
+                              "\r\n"
+                              "<html>\r\n"
+                              "<body>\r\n"
+                              "<h1>Hello, World!</h1>\r\n"
+                              "</body>\r\n"
+                              "</html>";
 
 /**
  * @brief Parse the request buffer and fill in request structure
@@ -63,7 +80,7 @@ static int parseRequestHeaders(HttpRequestT *pRequest);
  * @return  1        Error occured
  * @return  0        Success
  */
-static int readLine(char *pBuffer, long length, long offset, long* lastCharOffset);
+static int getEndOfLineOffset(char *pBuffer, long length, long offset, long* lastCharOffset);
 
 /**
  * @brief Get the offset of next SPACE character in the buffer, starting from specified offset
@@ -76,6 +93,10 @@ static int readLine(char *pBuffer, long length, long offset, long* lastCharOffse
  * @returnb     0           Success
  */
 static int getNextSpaceOffset(char* pBuffer, long length, long offset, long* spaceOffset);
+
+static int getNextNonSpaceOffset(char* pBuffer, long length, long offset, long* nonSpaceOffset);
+
+static int getIndexOf(char ch, char* pBuffer, long length, long offset, long* index);
 
 static boolean isVersionLengthValid(long length);
 
@@ -95,7 +116,7 @@ static boolean isEmptyLine(char* pLine);
  * @return      TRUE        Given string is equal to an expected HTTP method
  * @return      FALSE       Given string is not equal to an expected HTTP method
  */
-static boolean isMethodAsExpected(char* pString, long length, HttpMethodT expectedMethod);
+static boolean isMethodEqualToExpected(char* pString, long length, HttpMethodT expectedMethod);
 
 /**
  * @brief Get HTTP Method as enumerator from string form
@@ -107,7 +128,11 @@ static boolean isMethodAsExpected(char* pString, long length, HttpMethodT expect
  */
 static HttpMethodT getHttpMethodFromString(char* pString, long length);
 
-static boolean isMethodAsExpected(char* pString, long length, HttpMethodT expectedMethod)
+static HttpVersionT getHttpVersionFromString(char* pString, long length);
+
+static int parseHeaderLine(char* pBuffer, long length, long offset, long* nextLineOffset);
+
+static boolean isMethodEqualToExpected(char* pString, long length, HttpMethodT expectedMethod)
 {
     boolean     result;
     const char* expectedMethodString;
@@ -195,14 +220,7 @@ static boolean isPathLengthValid(long length)
 
 static boolean isVersionSupported(HttpRequestT *pRequest)
 {
-    long  versionOffset = pRequest->versionOffset;
-    long  versionLength = pRequest->versionLength;
-    char* pBuffer       = pRequest->pRequestBuffer;
-    char* pVersion      = pBuffer[versionOffset];
-
-    int diff = memcmp(httpVersionString, pVersion, versionLength);
-
-    return (0 == diff) ? TRUE : FALSE;
+    return (pRequest->version == HTTP_VERSION_1_1) ? TRUE : FALSE;
 }
 
 static boolean isEmptyLine(char* pLine)
@@ -223,6 +241,7 @@ static int parseRequestLine(HttpRequestT *pRequest)
     char* pBuffer = pRequest->pRequestBuffer;
     long  bufferLength = pRequest->requestLength;
     HttpMethodT method;
+    HttpVersionT version; 
     long offsetBegin = 0;
     long offsetEnd;
     long spaceOffset;
@@ -231,7 +250,7 @@ static int parseRequestLine(HttpRequestT *pRequest)
     long versionOffset;
     long versionLength;
 
-    error = readLine(pBuffer, bufferLength, offsetBegin, offsetEnd);
+    error = getEndOfLineOffset(pBuffer, bufferLength, offsetBegin, offsetEnd);
 
     if (0 == error)
     {
@@ -277,8 +296,45 @@ static int parseRequestLine(HttpRequestT *pRequest)
 
     if (0 == error)
     {
-        pRequest->versionOffset = versionOffset;
-        pRequest->versionLength = versionLength;
+        char* pVersion = pBuffer[versionOffset];
+        version = getHttpVersionFromString(pVersion, versionLength);
+
+        if(HTTP_VERSION_UNDEFINED == version)
+        {
+            error = 1;
+        }
+        else
+        {
+            pRequest->version       = version;
+            pRequest->versionOffset = versionOffset;
+            pRequest->versionLength = versionLength;
+        }
+
+    }
+
+    return error;
+}
+
+static int parseHostHeader(char* pBuffer, long length, long offset)
+{
+    int error;
+    long endOfLineOffset;
+    long lineLength;
+
+    if(offset >= length )
+    {
+        error = 1;
+    }
+
+    if (0 == error)
+    {
+        error = getEndOfLineOffset(pBuffer, length, offset, &endOfLineOffset);
+    }
+
+    if (0 == error)
+    {
+        lineLength = endOfLineOffset - offset + 1;
+        
     }
 
     return error;
@@ -293,11 +349,48 @@ static int parseRequestHeaders(HttpRequestT *pRequest)
     long    headerLength;
     long    nextLineOffset;
     boolean isEmptyLineEncountered = FALSE;
+    char* headerHostString = "Host";
 
     /* Calculate header offset, skip CRLF of request line */
     headerOffset = pRequest->versionOffset + pRequest->versionLength + 2;
+    pRequest->headersOffset = headerOffset;
+
+    if(headerOffset >= bufferLength)
+    {
+        error = 1;
+    }
+
+    if (0 == error)
+    {
+        do
+        {
+            if( isEmptyLine(pBuffer[headerOffset]) ) break;
+            error = parseHeaderLine(pBuffer, bufferLength, headerOffset, &headerOffset);
+        } while(0 == error && headerOffset < bufferLength);
+    }
     
-    nextLineOffset = headerOffset;
+    return error;
+}
+
+static int parseHeaderLine(char* pBuffer, long length, long offset, long* nextLineOffset)
+{
+    int error;
+    long keyEndOffset;
+    long keyLength;
+    long endLineOffset;
+    long keyStartOffset = offset;
+
+    error = getEndOfLineOffset(pBuffer, length, offset, &endLineOffset);
+
+    if (0 == error)
+    {
+        error = getIndexOf(COLON_CHAR, pBuffer, length, keyStartOffset, &keyEndOffset);
+    }
+
+    if (0 == error)
+    {
+        keyLength = keyEndOffset - keyStartOffset;
+    }
 }
 
 static int parseRequestBuffer(HttpRequestT *pRequest)
@@ -329,7 +422,7 @@ static HttpMethodT getHttpMethodFromString(char* pString, long length)
 
     for (httpMethodEnum = 0; httpMethodEnum < HTTP_METHOD_NUM; httpMethodEnum++)
     {
-        if(isMethodAsExpected(pString, length, (HttpMethodT)httpMethodEnum))
+        if(isMethodEqualToExpected(pString, length, (HttpMethodT)httpMethodEnum))
         {
             method = (HttpMethodT)httpMethodEnum;
             break;
@@ -339,13 +432,77 @@ static HttpMethodT getHttpMethodFromString(char* pString, long length)
     return method;
 }
 
+static HttpVersionT getHttpVersionFromString(char* pString, long length)
+{
+    HttpVersionT version = HTTP_VERSION_UNDEFINED;
+    int diff;
+
+    diff = memcmp(version10String, pString, length);
+    if(0 == diff)
+    {
+        version = HTTP_VERSION_1_0;
+    }
+
+    if(HTTP_VERSION_UNDEFINED == version)
+    {
+        diff = memcmp(version11String, pString, length);
+        if(0 == diff)
+        {
+            version = HTTP_VERSION_1_1;
+        }
+    }
+
+    if(HTTP_VERSION_UNDEFINED == version)
+    {
+        diff = memcmp(version20String, pString, length);
+        if(0 == diff)
+        {
+            version = HTTP_VERSION_2_0;
+        }
+    }
+
+    return version;
+}
+
+static int getNextNonSpaceOffset(char* pBuffer, long length, long offset, long* nonSpaceOffset)
+{
+    long idx = 0;
+    while(pBuffer[idx + offset] == SPACE_CHAR)
+    {
+        idx++;
+        if((idx >= HTTP_SERVER_MAX_URI_LENGTH) || ((idx + offset) >= length))
+        {
+            return 1;
+        }
+    }
+    *nonSpaceOffset = idx + offset;
+
+    return 0;
+}
+
+static int getIndexOf(char ch, char* pBuffer, long length, long offset, long* index)
+{
+    long idx = 0;
+    while(pBuffer[idx + offset] == ch)
+    {
+        idx++;
+        if((idx >= HTTP_SERVER_MAX_URI_LENGTH) || ((idx + offset) >= length))
+        {
+            return 1;
+        }
+    }
+    *index = idx + offset;
+
+    return 0;
+}
+
 static int getNextSpaceOffset(char* pBuffer, long length, long offset, long* spaceOffset)
 {
     long idx = 0;
     while(pBuffer[idx + offset] != SPACE_CHAR)
     {
         idx++;
-        if(idx >= HTTP_SERVER_MAX_URI_LENGTH || idx >= length)
+        if((idx >= HTTP_SERVER_MAX_URI_LENGTH) || ((idx + offset) >= length))
         {
             return 1;
         }
@@ -355,14 +512,14 @@ static int getNextSpaceOffset(char* pBuffer, long length, long offset, long* spa
     return 0;
 }
 
-static int readLine(char *pBuffer, long length, long offset, long* lastCharOffset)
+static int getEndOfLineOffset(char *pBuffer, long length, long offset, long* lastCharOffset)
 {
     long idx = 0;
 
     while (pBuffer[idx + offset] != CR_CHAR || pBuffer[idx + offset + 1] != LF_CHAR)
     {
         idx++;
-        if(idx > HTTP_SERVER_MAX_LINE_LENGTH || idx >= length)
+        if((idx > HTTP_SERVER_MAX_LINE_LENGTH) || ((idx + offset) >= length))
         {
             return 1;
         }
@@ -389,16 +546,16 @@ int HttpServer_Handler(void *pArgs)
 
     //memcpy(sendBuffer, receiveBuffer, index);
 
-    //write(pClient->connection, sendBuffer, 10);
+    write(pClient->connection, response, sizeof(response));
+    close(pClient->connection);
+    fprintf(stdout, "%s\r\n%s\r\n", receiveBuffer, response);
 
-    fprintf(stdout, "%s\r\n%s\r\n", receiveBuffer, sendBuffer);
+    //HttpRequestT request;
 
-    HttpRequestT request;
+    //request.pRequestBuffer = receiveBuffer;
+    //request.requestLength = readBytes;
 
-    request.pRequestBuffer = receiveBuffer;
-    request.requestLength = readBytes;
-
-    parseRequestLine(&request);
+    //parseRequestLine(&request);
 
     return 0;
 }
